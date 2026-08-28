@@ -83,25 +83,130 @@
     if (!pk) {
       return { ok: false, error: 'Missing account id — rescan and try again.' };
     }
-    // Instagram's web app sends this claim (kept in the page's sessionStorage)
-    // on write requests; content scripts share the page's same-origin storage.
-    let wwwClaim = null;
-    try {
-      wwwClaim = window.sessionStorage.getItem('www-claim-v2');
-    } catch {
-      // sessionStorage may be blocked; the request usually still succeeds.
-    }
     try {
       const result = await api.setFollowState({
         targetId: pk,
         follow,
         csrfToken: api.getCookie('csrftoken'),
-        wwwClaim,
+        wwwClaim: getWwwClaim(),
+        ajaxHash: getRolloutHash(),
+        fetchFn: pageWorldFetch,
       });
       return { ok: true, following: result.following };
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
     }
+  }
+
+  function getWwwClaim() {
+    try {
+      return window.sessionStorage.getItem('www-claim-v2') || window.localStorage.getItem('www-claim-v2');
+    } catch {
+      return null;
+    }
+  }
+
+  function getRolloutHash() {
+    try {
+      const nodes = document.querySelectorAll('script[type="application/json"]');
+      for (const node of nodes) {
+        const text = node.textContent;
+        if (!text || !text.includes('rollout_hash')) continue;
+        const found = text.match(/"rollout_hash"\s*:\s*"([^"]+)"/);
+        if (found) return found[1];
+      }
+    } catch {
+      // DOM shape varies; the MAIN-world bridge also fills this header.
+    }
+    return '1';
+  }
+
+  let pageBridgeReady = false;
+
+  function postToPage(payload) {
+    window.postMessage(payload, window.location.origin);
+  }
+
+  function pingPageBridge(timeoutMs) {
+    return new Promise((resolve) => {
+      const id = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        resolve(false);
+      }, timeoutMs);
+      function onMessage(event) {
+        if (event.source !== window) return;
+        if (event.data?.type !== 'IU_PAGE_PONG' || event.data?.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        resolve(true);
+      }
+      window.addEventListener('message', onMessage);
+      postToPage({ type: 'IU_PAGE_PING', id });
+    });
+  }
+
+  async function ensurePageBridge() {
+    if (pageBridgeReady) return;
+    if (await pingPageBridge(250)) {
+      pageBridgeReady = true;
+      return;
+    }
+    try {
+      await chrome.runtime.sendMessage({ type: 'IU_INJECT_PAGE_BRIDGE' });
+    } catch {
+      // Service worker may still inject after waking; ping again below.
+    }
+    if (await pingPageBridge(1500)) {
+      pageBridgeReady = true;
+      return;
+    }
+    throw new Error('Could not reach Instagram in this tab. Reload the instagram.com tab and try again.');
+  }
+
+  async function pageWorldFetch(url, options = {}) {
+    await ensurePageBridge();
+    return new Promise((resolve, reject) => {
+      const id = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('Instagram did not respond. Reload the instagram.com tab and try again.'));
+      }, 20000);
+      function onMessage(event) {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data.type !== 'IU_PAGE_FETCH_RESULT' || data.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        if (data.error) {
+          reject(new Error(data.error));
+          return;
+        }
+        resolve({
+          ok: Boolean(data.ok),
+          status: data.status ?? 0,
+          url: data.url ?? url,
+          redirected: Boolean(data.redirected),
+          json: async () => {
+            if (data.json != null) return data.json;
+            throw new SyntaxError('Unexpected token');
+          },
+          text: async () => data.text ?? '',
+          clone() {
+            return this;
+          },
+        });
+      }
+      window.addEventListener('message', onMessage);
+      postToPage({
+        type: 'IU_PAGE_FETCH',
+        id,
+        url,
+        method: options.method || 'POST',
+        headers: options.headers || {},
+        body: options.body || null,
+      });
+    });
   }
 
   async function runScan(source = 'manual') {

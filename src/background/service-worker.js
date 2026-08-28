@@ -42,7 +42,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 /* ---------- messages ---------- */
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'IU_SCAN_COMPLETE') {
     const count = Number(message.unfollowerCount) || 0;
     setBadge(count === 0 ? '' : count > 999 ? '999+' : String(count));
@@ -63,7 +63,23 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     // A fresh content script in a tab that was mid-scan means the scan died
     // with the old page — clear the stale scanning badge.
     clearIfScanningTab(sender?.tab?.id);
+  } else if (message?.type === 'IU_INJECT_PAGE_BRIDGE') {
+    const tabId = sender?.tab?.id;
+    if (tabId == null) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        files: ['src/content/page-bridge.js'],
+        world: 'MAIN',
+      })
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message ?? err) }));
+    return true;
   }
+  return false;
 });
 
 async function clearIfScanningTab(tabId) {
@@ -221,6 +237,11 @@ async function waitForContentScript(tabId, timeoutMs = 45000) {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === 'complete') {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['src/content/page-bridge.js'],
+            world: 'MAIN',
+          });
           await chrome.scripting.executeScript({ target: { tabId }, files: ['src/content/content.js'] });
           injected = true;
         }

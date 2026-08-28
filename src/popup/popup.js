@@ -114,6 +114,11 @@ async function getContentState(tabId) {
     // Content script not there yet (e.g. extension installed after the tab
     // loaded) — inject it and retry once.
     try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['src/content/page-bridge.js'],
+        world: 'MAIN',
+      });
       await chrome.scripting.executeScript({ target: { tabId }, files: ['src/content/content.js'] });
       return await chrome.tabs.sendMessage(tabId, { type: 'IU_GET_STATE' });
     } catch {

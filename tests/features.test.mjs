@@ -158,7 +158,9 @@ test('setFollowState unfollow POSTs to friendships/destroy with the web-client h
   assert.equal(calls[0].options.headers['x-csrftoken'], 'CSRF');
   assert.equal(calls[0].options.headers['x-requested-with'], 'XMLHttpRequest');
   assert.equal(calls[0].options.headers['x-ig-www-claim'], 'CLAIM');
+  assert.equal(calls[0].options.headers['x-instagram-ajax'], '1');
   assert.equal(calls[0].options.headers['content-type'], 'application/x-www-form-urlencoded');
+  assert.equal(calls[0].options.body, 'user_id=77&container_module=profile_unfollow&radio_type=wifi-none');
   assert.equal(calls[0].options.credentials, 'include');
 });
 
@@ -185,12 +187,42 @@ test('setFollowState requires a CSRF token and does not fire the request without
   assert.equal(called, false);
 });
 
+test('setFollowState falls back to the web unfollow endpoint when destroy returns HTML', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('/destroy/')) return htmlResponse('<!DOCTYPE html><html><body>Log in</body></html>');
+    return jsonResponse({ status: 'ok', friendship_status: { following: false } });
+  };
+  const result = await setFollowState({ targetId: '1', follow: false, csrfToken: 'CSRF', fetchFn });
+  assert.equal(result.following, false);
+  assert.equal(calls[0], 'https://www.instagram.com/api/v1/friendships/destroy/1/');
+  assert.equal(calls[1], 'https://www.instagram.com/web/friendships/1/unfollow/');
+});
+
 test('setFollowState turns an HTML login/redirect response into an actionable auth error', async () => {
   const fetchFn = async () => htmlResponse('<!DOCTYPE html><html><body>Log in</body></html>');
   await assert.rejects(
     setFollowState({ targetId: '1', follow: false, csrfToken: 'CSRF', fetchFn }),
     (err) => err.code === 'auth' && /login or security-check/i.test(err.message)
   );
+});
+
+test('setFollowState does not fall back on rate limits', async () => {
+  let calls = 0;
+  await assert.rejects(
+    setFollowState({
+      targetId: '1',
+      follow: false,
+      csrfToken: 'CSRF',
+      fetchFn: async () => {
+        calls += 1;
+        return jsonResponse({}, { status: 429 });
+      },
+    }),
+    { code: 'rate_limit' }
+  );
+  assert.equal(calls, 1);
 });
 
 test('setFollowState surfaces auth, rate-limit and bad-body errors', async () => {

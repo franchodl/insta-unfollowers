@@ -51,7 +51,7 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildHeaders(csrfToken, { wwwClaim = null } = {}) {
+function buildHeaders(csrfToken, { wwwClaim = null, ajaxHash = null } = {}) {
   // Mirror the headers Instagram's own web client sends. In particular
   // x-requested-with: XMLHttpRequest makes Instagram answer POST actions with
   // JSON instead of redirecting to an HTML page.
@@ -63,6 +63,7 @@ function buildHeaders(csrfToken, { wwwClaim = null } = {}) {
   };
   if (csrfToken) headers['x-csrftoken'] = csrfToken;
   if (wwwClaim) headers['x-ig-www-claim'] = wwwClaim;
+  if (ajaxHash) headers['x-instagram-ajax'] = ajaxHash;
   return headers;
 }
 
@@ -160,15 +161,49 @@ export async function fetchUserInfo({ userId, csrfToken = null, fetchFn = global
   };
 }
 
+function shouldFallbackFollowEndpoint(err) {
+  return err instanceof IgApiError && (err.code === 'auth' || err.code === 'bad_body');
+}
+
+async function postFollowChange({
+  url,
+  body,
+  follow,
+  csrfToken,
+  wwwClaim,
+  ajaxHash,
+  fetchFn,
+}) {
+  const headers = buildHeaders(csrfToken, { wwwClaim, ajaxHash: ajaxHash ?? '1' });
+  if (body) headers['content-type'] = 'application/x-www-form-urlencoded';
+  const res = await fetchFn(url, {
+    method: 'POST',
+    headers,
+    body: body || undefined,
+    credentials: 'include',
+  });
+  throwForStatus(res);
+  const parsed = await parseJson(res);
+  if (parsed?.status !== 'ok') {
+    throw new IgApiError('Instagram rejected the follow change.', { code: 'bad_body' });
+  }
+  return { following: Boolean(parsed.friendship_status?.following ?? follow) };
+}
+
 /**
  * Follow or unfollow a single account (user-initiated, one at a time — this
  * client deliberately has no bulk mode). Returns { following: boolean }.
+ *
+ * Write requests must run as same-origin fetches inside the instagram.com
+ * tab (see page-bridge.js). Isolated-world fetch() sends a chrome-extension
+ * Origin, and Instagram answers those POSTs with an HTML login page.
  */
 export async function setFollowState({
   targetId,
   follow,
   csrfToken = null,
   wwwClaim = null,
+  ajaxHash = null,
   fetchFn = globalThis.fetch,
 }) {
   // The write endpoints reject requests without the CSRF token (they return an
@@ -180,21 +215,26 @@ export async function setFollowState({
     );
   }
   const action = follow ? 'create' : 'destroy';
-  const res = await fetchFn(`${API_BASE}/friendships/${action}/${targetId}/`, {
-    method: 'POST',
-    headers: {
-      ...buildHeaders(csrfToken, { wwwClaim }),
-      'content-type': 'application/x-www-form-urlencoded',
-    },
-    body: 'container_module=self_unified_follow_lists',
-    credentials: 'include',
-  });
-  throwForStatus(res);
-  const body = await parseJson(res);
-  if (body?.status !== 'ok') {
-    throw new IgApiError('Instagram rejected the follow change.', { code: 'bad_body' });
+  const body = new URLSearchParams({
+    user_id: String(targetId),
+    container_module: follow ? 'profile' : 'profile_unfollow',
+    radio_type: 'wifi-none',
+  }).toString();
+  const args = { body, follow, csrfToken, wwwClaim, ajaxHash, fetchFn };
+  try {
+    return await postFollowChange({
+      url: `${API_BASE}/friendships/${action}/${targetId}/`,
+      ...args,
+    });
+  } catch (err) {
+    if (!shouldFallbackFollowEndpoint(err)) throw err;
+    const legacy = follow ? 'follow' : 'unfollow';
+    return await postFollowChange({
+      url: `https://www.instagram.com/web/friendships/${targetId}/${legacy}/`,
+      ...args,
+      body: null,
+    });
   }
-  return { following: Boolean(body.friendship_status?.following ?? follow) };
 }
 
 /**
