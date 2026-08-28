@@ -1,8 +1,12 @@
 # Insta Unfollowers
 
-A Chrome extension that shows which Instagram accounts **you follow that don't follow you back** — plus your "fans" (people who follow you that you don't follow back).
+Tired of thinking you have a lot of friends, buy you have none?
 
-Everything runs **100% locally in your browser**, using the Instagram tab you are already logged in to. No external servers, no analytics, no credentials handled — ever.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A Chrome extension that shows which Instagram accounts **you follow that don't follow you back** PLUS your "fans" (people who follow you that you don't follow back), to understand your own karma.
+
+Everything runs **100% locally in your browser**, using the Instagram tab you are already logged in to. No external servers, no analytics, no credentials handled. Totally legal.
 
 ## Features
 
@@ -23,7 +27,11 @@ Everything runs **100% locally in your browser**, using the Instagram tab you ar
 
 ## Install (Developer mode)
 
-1. Download or clone this repository.
+1. Clone this repository:
+
+   ```bash
+   git clone https://github.com/franchodl/insta-unfollowers.git
+   ```
 2. Open Chrome and go to `chrome://extensions`.
 3. Turn on **Developer mode** (top-right toggle).
 4. Click **Load unpacked** and select this project's folder (the one containing `manifest.json`).
@@ -135,4 +143,4 @@ This is an unofficial tool, not affiliated with or endorsed by Instagram/Meta. I
 
 ## License
 
-[MIT](LICENSE)
+This project is open source under the [MIT License](LICENSE).
