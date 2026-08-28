@@ -165,15 +165,16 @@ function shouldFallbackFollowEndpoint(err) {
   return err instanceof IgApiError && (err.code === 'auth' || err.code === 'bad_body');
 }
 
-async function postFollowChange({
-  url,
-  body,
-  follow,
-  csrfToken,
-  wwwClaim,
-  ajaxHash,
-  fetchFn,
-}) {
+function requireCsrf(csrfToken) {
+  if (!csrfToken) {
+    throw new IgApiError(
+      'Missing Instagram security token. Reload your instagram.com tab and try again.',
+      { code: 'auth' }
+    );
+  }
+}
+
+async function postFriendshipWrite({ url, body, csrfToken, wwwClaim, ajaxHash, fetchFn }) {
   const headers = buildHeaders(csrfToken, { wwwClaim, ajaxHash: ajaxHash ?? '1' });
   if (body) headers['content-type'] = 'application/x-www-form-urlencoded';
   const res = await fetchFn(url, {
@@ -185,9 +186,9 @@ async function postFollowChange({
   throwForStatus(res);
   const parsed = await parseJson(res);
   if (parsed?.status !== 'ok') {
-    throw new IgApiError('Instagram rejected the follow change.', { code: 'bad_body' });
+    throw new IgApiError('Instagram rejected the request.', { code: 'bad_body' });
   }
-  return { following: Boolean(parsed.friendship_status?.following ?? follow) };
+  return parsed;
 }
 
 /**
@@ -206,35 +207,64 @@ export async function setFollowState({
   ajaxHash = null,
   fetchFn = globalThis.fetch,
 }) {
-  // The write endpoints reject requests without the CSRF token (they return an
-  // HTML page, not JSON) — fail early with a clear, actionable message.
-  if (!csrfToken) {
-    throw new IgApiError(
-      'Missing Instagram security token. Reload your instagram.com tab and try again.',
-      { code: 'auth' }
-    );
-  }
+  requireCsrf(csrfToken);
   const action = follow ? 'create' : 'destroy';
   const body = new URLSearchParams({
     user_id: String(targetId),
     container_module: follow ? 'profile' : 'profile_unfollow',
     radio_type: 'wifi-none',
   }).toString();
-  const args = { body, follow, csrfToken, wwwClaim, ajaxHash, fetchFn };
+  const args = { body, csrfToken, wwwClaim, ajaxHash, fetchFn };
+  let parsed;
   try {
-    return await postFollowChange({
+    parsed = await postFriendshipWrite({
       url: `${API_BASE}/friendships/${action}/${targetId}/`,
       ...args,
     });
   } catch (err) {
     if (!shouldFallbackFollowEndpoint(err)) throw err;
     const legacy = follow ? 'follow' : 'unfollow';
-    return await postFollowChange({
+    parsed = await postFriendshipWrite({
       url: `https://www.instagram.com/web/friendships/${targetId}/${legacy}/`,
       ...args,
       body: null,
     });
   }
+  return { following: Boolean(parsed.friendship_status?.following ?? follow) };
+}
+
+/**
+ * Remove a follower (they follow you; you are not following them back).
+ * One click, one request — no bulk mode. Returns { removed: true }.
+ */
+export async function removeFollower({
+  targetId,
+  csrfToken = null,
+  wwwClaim = null,
+  ajaxHash = null,
+  fetchFn = globalThis.fetch,
+}) {
+  requireCsrf(csrfToken);
+  const body = new URLSearchParams({
+    user_id: String(targetId),
+    container_module: 'profile',
+    radio_type: 'wifi-none',
+  }).toString();
+  const args = { body, csrfToken, wwwClaim, ajaxHash, fetchFn };
+  try {
+    await postFriendshipWrite({
+      url: `${API_BASE}/friendships/remove_follower/${targetId}/`,
+      ...args,
+    });
+  } catch (err) {
+    if (!shouldFallbackFollowEndpoint(err)) throw err;
+    await postFriendshipWrite({
+      url: `https://www.instagram.com/web/friendships/${targetId}/remove_follower/`,
+      ...args,
+      body: null,
+    });
+  }
+  return { removed: true };
 }
 
 /**

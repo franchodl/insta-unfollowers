@@ -6,22 +6,29 @@
  * an HTML login/checkpoint page instead of JSON). Requests issued here are
  * same-origin with instagram.com, so the browser sets Origin/Referer itself.
  *
- * Talks to the isolated content script via window.postMessage. Only follow /
- * unfollow URLs are allowed — this is not a generic fetch proxy.
+ * Talks to the isolated content script via window.postMessage. Only follow,
+ * unfollow, and remove-follower URLs are allowed — this is not a generic
+ * fetch proxy.
+ *
+ * Message types are versioned (V2) so a stale listener from an earlier
+ * extension load — which this page cannot remove — ignores the new traffic.
  */
 (() => {
-  if (window.__iuPageBridge) return;
-  window.__iuPageBridge = true;
-
+  const BRIDGE_VERSION = 2;
   const IG_ORIGIN = 'https://www.instagram.com';
+  const PING = 'IU_PAGE_PING_V2';
+  const PONG = 'IU_PAGE_PONG_V2';
+  const FETCH = 'IU_PAGE_FETCH_V2';
+  const RESULT = 'IU_PAGE_FETCH_RESULT_V2';
 
   function isAllowedUrl(url) {
     try {
       const parsed = new URL(url);
       if (parsed.origin !== IG_ORIGIN) return false;
+      const path = parsed.pathname.replace(/\/+$/, '') + '/';
       return (
-        /^\/api\/v1\/friendships\/(create|destroy)\/[^/]+\/$/.test(parsed.pathname) ||
-        /^\/web\/friendships\/[^/]+\/(follow|unfollow)\/$/.test(parsed.pathname)
+        /^\/api\/v1\/friendships\/(create|destroy|remove_follower)\/[^/]+\/$/.test(path) ||
+        /^\/web\/friendships\/[^/]+\/(follow|unfollow|remove_follower)\/$/.test(path)
       );
     } catch {
       return false;
@@ -74,20 +81,20 @@
   }
 
   function reply(id, payload) {
-    window.postMessage({ type: 'IU_PAGE_FETCH_RESULT', id, ...payload }, IG_ORIGIN);
+    window.postMessage({ type: RESULT, id, ...payload }, IG_ORIGIN);
   }
 
-  window.addEventListener('message', async (event) => {
+  async function onMessage(event) {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || typeof data !== 'object') return;
 
-    if (data.type === 'IU_PAGE_PING' && data.id) {
-      window.postMessage({ type: 'IU_PAGE_PONG', id: data.id }, IG_ORIGIN);
+    if (data.type === PING && data.id) {
+      window.postMessage({ type: PONG, id: data.id, version: BRIDGE_VERSION }, IG_ORIGIN);
       return;
     }
 
-    if (data.type !== 'IU_PAGE_FETCH' || !data.id) return;
+    if (data.type !== FETCH || !data.id) return;
     if (typeof data.url !== 'string' || !isAllowedUrl(data.url)) {
       reply(data.id, { error: 'Blocked unexpected Instagram URL.' });
       return;
@@ -118,5 +125,15 @@
     } catch (err) {
       reply(data.id, { error: String(err?.message ?? err) });
     }
-  });
+  }
+
+  window.__iuPageBridgeHandler = onMessage;
+  if (!window.__iuPageBridgeDispatching) {
+    window.__iuPageBridgeDispatching = true;
+    window.addEventListener('message', (event) => {
+      window.__iuPageBridgeHandler?.(event);
+    });
+  }
+  window.__iuPageBridge = true;
+  window.__iuPageBridgeVersion = BRIDGE_VERSION;
 })();

@@ -52,10 +52,11 @@
   const HISTORY_LIMIT = 120;
 
   async function saveScan(scan, compare) {
-    const { scans = {}, histories = {}, unfollowed = {} } = await chrome.storage.local.get([
+    const { scans = {}, histories = {}, unfollowed = {}, removedFans = {} } = await chrome.storage.local.get([
       'scans',
       'histories',
       'unfollowed',
+      'removedFans',
     ]);
     scan.diff = compare.diffScans(scans[scan.userId] ?? null, scan);
     scans[scan.userId] = scan;
@@ -69,10 +70,17 @@
       newUnfollowerCount: scan.diff?.newUnfollowers.length ?? 0,
     });
     histories[scan.userId] = history.slice(-HISTORY_LIMIT);
-    // A fresh scan reflects the real follow state, so per-row unfollow
-    // toggles from the previous results are stale.
+    // A fresh scan reflects the real follow state, so per-row unfollow /
+    // remove-follower toggles from the previous results are stale.
     unfollowed[scan.userId] = [];
-    await chrome.storage.local.set({ scans, histories, unfollowed, lastScanUserId: scan.userId });
+    removedFans[scan.userId] = [];
+    await chrome.storage.local.set({
+      scans,
+      histories,
+      unfollowed,
+      removedFans,
+      lastScanUserId: scan.userId,
+    });
   }
 
   async function setFollow(pk, follow) {
@@ -93,6 +101,28 @@
         fetchFn: pageWorldFetch,
       });
       return { ok: true, following: result.following };
+    } catch (err) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  }
+
+  async function removeFan(pk) {
+    const { api } = await libReady;
+    if (!api.getCookie('ds_user_id')) {
+      return { ok: false, error: 'You are not logged in to Instagram in this tab.' };
+    }
+    if (!pk) {
+      return { ok: false, error: 'Missing account id — rescan and try again.' };
+    }
+    try {
+      await api.removeFollower({
+        targetId: pk,
+        csrfToken: api.getCookie('csrftoken'),
+        wwwClaim: getWwwClaim(),
+        ajaxHash: getRolloutHash(),
+        fetchFn: pageWorldFetch,
+      });
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
     }
@@ -136,13 +166,13 @@
       }, timeoutMs);
       function onMessage(event) {
         if (event.source !== window) return;
-        if (event.data?.type !== 'IU_PAGE_PONG' || event.data?.id !== id) return;
+        if (event.data?.type !== 'IU_PAGE_PONG_V2' || event.data?.id !== id) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
         resolve(true);
       }
       window.addEventListener('message', onMessage);
-      postToPage({ type: 'IU_PAGE_PING', id });
+      postToPage({ type: 'IU_PAGE_PING_V2', id });
     });
   }
 
@@ -175,7 +205,7 @@
       function onMessage(event) {
         if (event.source !== window) return;
         const data = event.data;
-        if (!data || data.type !== 'IU_PAGE_FETCH_RESULT' || data.id !== id) return;
+        if (!data || data.type !== 'IU_PAGE_FETCH_RESULT_V2' || data.id !== id) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
         if (data.error) {
@@ -199,7 +229,7 @@
       }
       window.addEventListener('message', onMessage);
       postToPage({
-        type: 'IU_PAGE_FETCH',
+        type: 'IU_PAGE_FETCH_V2',
         id,
         url,
         method: options.method || 'POST',
@@ -320,6 +350,9 @@
         return false;
       case 'IU_SET_FOLLOW':
         setFollow(String(message.pk ?? ''), Boolean(message.follow)).then(sendResponse);
+        return true;
+      case 'IU_REMOVE_FOLLOWER':
+        removeFan(String(message.pk ?? '')).then(sendResponse);
         return true;
       default:
         return false;

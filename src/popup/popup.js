@@ -19,6 +19,7 @@ const state = {
   scan: null, // scan results shown in the results view
   whitelist: new Set(), // pks the user chose to ignore
   unfollowedSet: new Set(), // pks unfollowed from the popup since the last scan
+  removedFanSet: new Set(), // pks removed as followers from the Fans tab since the last scan
   newUnfollowerPks: new Set(), // pks that are new since the previous scan
   settings: { ...DEFAULT_SETTINGS },
   inSettings: false,
@@ -159,12 +160,21 @@ async function reloadStoredData() {
     lastScanUserId = null,
     whitelists = {},
     unfollowed = {},
+    removedFans = {},
     settings = {},
-  } = await chrome.storage.local.get(['scans', 'lastScanUserId', 'whitelists', 'unfollowed', 'settings']);
+  } = await chrome.storage.local.get([
+    'scans',
+    'lastScanUserId',
+    'whitelists',
+    'unfollowed',
+    'removedFans',
+    'settings',
+  ]);
   const uid = state.userId ?? lastScanUserId;
   state.scan = uid !== null && uid !== undefined ? (scans[uid] ?? null) : null;
   state.whitelist = new Set(state.scan ? (whitelists[state.scan.userId] ?? []) : []);
   state.unfollowedSet = new Set(state.scan ? (unfollowed[state.scan.userId] ?? []) : []);
+  state.removedFanSet = new Set(state.scan ? (removedFans[state.scan.userId] ?? []) : []);
   state.newUnfollowerPks = new Set((state.scan?.diff?.newUnfollowers ?? []).map((u) => u.pk));
   state.settings = { ...DEFAULT_SETTINGS, ...settings };
 }
@@ -422,13 +432,20 @@ function renderTabs() {
   $('count-unfollowers').textContent = String(
     listFor('unfollowers').filter((u) => !state.whitelist.has(u.pk) && !state.unfollowedSet.has(u.pk)).length
   );
-  $('count-fans').textContent = String(listFor('fans').filter((u) => !state.whitelist.has(u.pk)).length);
+  $('count-fans').textContent = String(
+    listFor('fans').filter((u) => !state.whitelist.has(u.pk) && !state.removedFanSet.has(u.pk)).length
+  );
+}
+
+function hiddenByAction(u) {
+  if (state.activeTab === 'unfollowers') return state.unfollowedSet.has(u.pk);
+  if (state.activeTab === 'fans') return state.removedFanSet.has(u.pk);
+  return false;
 }
 
 function visibleUsers() {
   let users = listFor(state.activeTab);
-  // Accounts unfollowed from here are dropped from the unfollowers list.
-  if (state.activeTab === 'unfollowers') users = users.filter((u) => !state.unfollowedSet.has(u.pk));
+  users = users.filter((u) => !hiddenByAction(u));
   if (!state.showIgnored) users = users.filter((u) => !state.whitelist.has(u.pk));
   return filterUsers(users, state.query);
 }
@@ -439,20 +456,19 @@ function renderList() {
   const users = visibleUsers();
   if (users.length === 0) {
     const rawList = listFor(state.activeTab);
-    const afterUnfollow =
-      state.activeTab === 'unfollowers'
-        ? rawList.filter((u) => !state.unfollowedSet.has(u.pk))
-        : rawList;
+    const afterAction = rawList.filter((u) => !hiddenByAction(u));
     const allIgnored =
-      afterUnfollow.length > 0 && afterUnfollow.every((u) => state.whitelist.has(u.pk));
+      afterAction.length > 0 && afterAction.every((u) => state.whitelist.has(u.pk));
     const empty = document.createElement('p');
     empty.className = 'list-empty';
     empty.textContent = state.query
       ? 'No matches.'
-      : afterUnfollow.length === 0 && rawList.length > 0
-        ? 'You have unfollowed everyone on this list. 🎉'
+      : afterAction.length === 0 && rawList.length > 0
+        ? state.activeTab === 'fans'
+          ? 'You have removed everyone on this list. 🎉'
+          : 'You have unfollowed everyone on this list. 🎉'
         : allIgnored
-          ? `All ${afterUnfollow.length.toLocaleString()} account${afterUnfollow.length === 1 ? '' : 's'} here are ignored.`
+          ? `All ${afterAction.length.toLocaleString()} account${afterAction.length === 1 ? '' : 's'} here are ignored.`
           : state.activeTab === 'unfollowers'
             ? 'Everyone you follow follows you back. 🎉'
             : 'No accounts here.';
@@ -515,6 +531,13 @@ function userRow(u) {
     followBtn.title = `Unfollow @${u.username} on Instagram`;
     followBtn.addEventListener('click', () => unfollowUser(u, followBtn, row));
     row.append(followBtn);
+  } else if (state.activeTab === 'fans') {
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn-follow';
+    removeBtn.textContent = 'Remove';
+    removeBtn.title = `Remove @${u.username} as a follower`;
+    removeBtn.addEventListener('click', () => removeFan(u, removeBtn, row));
+    row.append(removeBtn);
   }
 
   const btn = document.createElement('button');
@@ -553,6 +576,33 @@ async function unfollowUser(u, btn, row) {
     await chrome.storage.local.set({ unfollowed });
   }
   showToast([`Unfollowed @${u.username}.`]);
+  fadeAndRemoveRow(row, () => renderList());
+}
+
+/**
+ * Remove one follower via the content script (one click, one request). On
+ * success the row fades out like Unfollow; the pk is remembered until the
+ * next scan so it doesn't reappear on re-render.
+ */
+async function removeFan(u, btn, row) {
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+  if (state.tabId === null) state.tabId = await findInstagramTabId();
+  const res = await sendToTab({ type: 'IU_REMOVE_FOLLOWER', pk: u.pk });
+  if (!res?.ok) {
+    btn.disabled = false;
+    btn.textContent = 'Remove';
+    showToast([res?.error ?? 'Could not reach your Instagram tab. Open instagram.com and try again.'], true);
+    return;
+  }
+  state.removedFanSet.add(u.pk);
+  const uid = state.scan?.userId;
+  if (uid !== null && uid !== undefined) {
+    const { removedFans = {} } = await chrome.storage.local.get('removedFans');
+    removedFans[uid] = [...state.removedFanSet];
+    await chrome.storage.local.set({ removedFans });
+  }
+  showToast([`Removed @${u.username}.`]);
   fadeAndRemoveRow(row, () => renderList());
 }
 

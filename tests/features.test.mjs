@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { diffScans, formatSyncSummary, toCsv } from '../src/lib/compare.js';
-import { setFollowState, IG_APP_ID } from '../src/lib/ig-api.js';
+import { setFollowState, removeFollower, IG_APP_ID } from '../src/lib/ig-api.js';
 
 const rec = (pk, username, fullName = '') => ({
   pk: String(pk),
@@ -253,4 +253,56 @@ test('setFollowState surfaces auth, rate-limit and bad-body errors', async () =>
     }),
     { code: 'bad_body' }
   );
+});
+
+test('removeFollower POSTs to friendships/remove_follower with the web-client headers', async () => {
+  const calls = [];
+  const fetchFn = async (url, options) => {
+    calls.push({ url, options });
+    return jsonResponse({ status: 'ok', friendship_status: { followed_by: false } });
+  };
+  const result = await removeFollower({
+    targetId: '77',
+    csrfToken: 'CSRF',
+    wwwClaim: 'CLAIM',
+    fetchFn,
+  });
+  assert.equal(result.removed, true);
+  assert.equal(calls[0].url, 'https://www.instagram.com/api/v1/friendships/remove_follower/77/');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers['x-ig-app-id'], IG_APP_ID);
+  assert.equal(calls[0].options.headers['x-csrftoken'], 'CSRF');
+  assert.equal(calls[0].options.headers['x-requested-with'], 'XMLHttpRequest');
+  assert.equal(calls[0].options.headers['x-ig-www-claim'], 'CLAIM');
+  assert.equal(calls[0].options.headers['x-instagram-ajax'], '1');
+  assert.equal(calls[0].options.body, 'user_id=77&container_module=profile&radio_type=wifi-none');
+  assert.equal(calls[0].options.credentials, 'include');
+});
+
+test('removeFollower falls back to the web endpoint when the v1 call returns HTML', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('/api/v1/')) return htmlResponse('<!DOCTYPE html><html><body>Log in</body></html>');
+    return jsonResponse({ status: 'ok' });
+  };
+  const result = await removeFollower({ targetId: '1', csrfToken: 'CSRF', fetchFn });
+  assert.equal(result.removed, true);
+  assert.equal(calls[0], 'https://www.instagram.com/api/v1/friendships/remove_follower/1/');
+  assert.equal(calls[1], 'https://www.instagram.com/web/friendships/1/remove_follower/');
+});
+
+test('removeFollower requires a CSRF token and does not fire the request without one', async () => {
+  let called = false;
+  await assert.rejects(
+    removeFollower({
+      targetId: '1',
+      fetchFn: async () => {
+        called = true;
+        return jsonResponse({ status: 'ok' });
+      },
+    }),
+    { code: 'auth' }
+  );
+  assert.equal(called, false);
 });
