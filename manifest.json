@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Insta Unfollowers",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "See who you follow on Instagram that doesn't follow you back. Runs 100% locally using your own logged-in session.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -21,7 +21,11 @@
     }
   },
   "permissions": ["storage", "unlimitedStorage", "scripting", "alarms", "notifications"],
-  "host_permissions": ["https://www.instagram.com/*"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "https://*.fbcdn.net/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"

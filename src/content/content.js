@@ -52,12 +52,8 @@
   const HISTORY_LIMIT = 120;
 
   async function saveScan(scan, compare) {
-    const { scans = {}, histories = {}, unfollowed = {}, removedFans = {} } = await chrome.storage.local.get([
-      'scans',
-      'histories',
-      'unfollowed',
-      'removedFans',
-    ]);
+    const { scans = {}, histories = {}, unfollowed = {}, removedFans = {}, followedBack = {} } =
+      await chrome.storage.local.get(['scans', 'histories', 'unfollowed', 'removedFans', 'followedBack']);
     scan.diff = compare.diffScans(scans[scan.userId] ?? null, scan);
     scans[scan.userId] = scan;
     const history = histories[scan.userId] ?? [];
@@ -71,14 +67,16 @@
     });
     histories[scan.userId] = history.slice(-HISTORY_LIMIT);
     // A fresh scan reflects the real follow state, so per-row unfollow /
-    // remove-follower toggles from the previous results are stale.
+    // remove-follower / follow-back toggles from the previous results are stale.
     unfollowed[scan.userId] = [];
     removedFans[scan.userId] = [];
+    followedBack[scan.userId] = [];
     await chrome.storage.local.set({
       scans,
       histories,
       unfollowed,
       removedFans,
+      followedBack,
       lastScanUserId: scan.userId,
     });
   }
@@ -169,7 +167,7 @@
         if (event.data?.type !== 'IU_PAGE_PONG_V2' || event.data?.id !== id) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
-        resolve(true);
+        resolve(Number(event.data.version) >= 3);
       }
       window.addEventListener('message', onMessage);
       postToPage({ type: 'IU_PAGE_PING_V2', id });

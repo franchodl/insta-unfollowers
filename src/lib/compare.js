@@ -5,12 +5,19 @@
 
 /** Normalize a raw Instagram API user object into the record we store. */
 export function toUserRecord(raw) {
-  const pk = raw?.pk ?? raw?.id ?? '';
+  let pk = raw?.pk ?? raw?.id ?? raw?.pk_id ?? raw?.strong_id__ ?? '';
+  if (pk && typeof pk === 'object') pk = pk.pk ?? pk.id ?? '';
+  const profilePicUrl =
+    raw?.profile_pic_url ||
+    raw?.profile_pic_url_hd ||
+    raw?.hd_profile_pic_url_info?.url ||
+    raw?.profile_pic?.url ||
+    '';
   return {
     pk: pk === null || pk === undefined ? '' : String(pk),
     username: raw?.username ?? '',
     fullName: raw?.full_name ?? '',
-    profilePicUrl: raw?.profile_pic_url ?? '',
+    profilePicUrl: typeof profilePicUrl === 'string' ? profilePicUrl : '',
     isPrivate: Boolean(raw?.is_private),
     isVerified: Boolean(raw?.is_verified),
   };

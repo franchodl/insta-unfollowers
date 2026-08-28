@@ -197,7 +197,20 @@ test('setFollowState falls back to the web unfollow endpoint when destroy return
   const result = await setFollowState({ targetId: '1', follow: false, csrfToken: 'CSRF', fetchFn });
   assert.equal(result.following, false);
   assert.equal(calls[0], 'https://www.instagram.com/api/v1/friendships/destroy/1/');
-  assert.equal(calls[1], 'https://www.instagram.com/web/friendships/1/unfollow/');
+  assert.equal(calls[1], 'https://www.instagram.com/api/v1/web/friendships/1/unfollow/');
+});
+
+test('setFollowState retries follow on HTTP 404 using the web follow endpoint', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('/friendships/create/')) return jsonResponse({}, { status: 404 });
+    return jsonResponse({ status: 'ok', friendship_status: { following: true } });
+  };
+  const result = await setFollowState({ targetId: '9', follow: true, csrfToken: 'CSRF', fetchFn });
+  assert.equal(result.following, true);
+  assert.equal(calls[0], 'https://www.instagram.com/api/v1/friendships/create/9/');
+  assert.equal(calls[1], 'https://www.instagram.com/api/v1/web/friendships/9/follow/');
 });
 
 test('setFollowState turns an HTML login/redirect response into an actionable auth error', async () => {

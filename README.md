@@ -13,7 +13,7 @@ Everything runs **100% locally in your browser**, using the Instagram tab you ar
 - 🔍 **One-click scan** of your following and followers lists
 - 📊 **Live progress** with real counts (the scan keeps running even if you close the popup)
 - 🚫 **"Don't follow back" list** with profile picture, username, and a one-click **Unfollow** button — the row fades out and drops off the list once the unfollow succeeds
-- 💜 **Fans tab** — people who follow you that you don't follow back, with a one-click **Remove** button (drops them as a follower; the row fades out)
+- 💜 **Fans tab** — people who follow you that you don't follow back, with **Follow** and **Remove** (each fades the row out)
 - 📈 **Change tracking** — every scan is diffed against the previous one, so new unfollowers are badged **NEW** and a banner tells you how many you gained since last time
 - ⏰ **Daily sync** (opt-in) — once a day while Chrome is open, rescan automatically and get a **system notification** summarising your totals and what changed
 - 🍞 **Result toast/notification** after every scan: followers, following, don't-follow-back and fans counts, with the change since the last sync
@@ -48,9 +48,14 @@ Results are cached locally, so reopening the popup shows your last scan instantl
 
 Each row in the **Don't follow back** tab has an **Unfollow** button. Clicking it unfollows that one account through your own session (a single request, exactly like clicking Unfollow on the website); on success the row **fades out and disappears** from the list, and the account stays gone (even if you reopen the popup) until your next scan. There is intentionally **no bulk-unfollow**: mass actions are the fastest way to get action-blocked, so this tool keeps it one deliberate click at a time.
 
-### Removing fans
+### Fans: follow or remove
 
-Each row in the **Fans** tab has a **Remove** button. Clicking it removes that account as a follower (they follow you; you don't follow them back) — the same action as **Remove** on Instagram's own followers list. The row fades out the same way Unfollow does, and stays gone until your next scan. Same rule: one click, one request, no bulk remove.
+Each row in the **Fans** tab has **Follow** and **Remove**:
+
+- **Follow** follows that account through your session (a follow request if they are private). They leave the Fans list because the follow is no longer one-way.
+- **Remove** drops them as a follower — the same action as **Remove** on Instagram's own followers list.
+
+On success the row fades out and stays gone until your next scan. One click, one request — no bulk actions.
 
 ### Daily sync & notifications (opt-in)
 
@@ -74,14 +79,14 @@ popup (UI)  ──messages──▶  content script (runs on instagram.com)
 - Requests are throttled with randomized delays (~1–2s per page of 100 accounts) and back off exponentially if Instagram responds with HTTP 429.
 - The two lists are compared by user id; results land in `chrome.storage.local` only.
 - Each scan is diffed against the previous one for the same account, and a rolling history of per-scan snapshots is kept locally for change tracking.
-- The **Unfollow** and **Remove** buttons call `friendships/destroy` and `friendships/remove_follower` for a single account per click — never in bulk.
+- The **Unfollow**, **Follow**, and **Remove** buttons call `friendships/destroy`, `friendships/create`, and `friendships/remove_follower` for a single account per click — never in bulk.
 - **Daily sync** is driven by a `chrome.alarms` timer in the service worker; it only runs if you turned it on, at most once per ~20h, and posts results via `chrome.notifications`.
 
 ## Privacy
 
-- **No data ever leaves your browser.** The only network requests made are to `www.instagram.com`, from your own session.
+- **No data ever leaves your browser.** The only network requests made are to `www.instagram.com` and Instagram's image CDNs (profile pictures), from your own session.
 - The extension never reads your password or session token; it only checks the non-sensitive `ds_user_id` / `csrftoken` cookies that instagram.com exposes to every script on its own page.
-- Permissions used: `storage`/`unlimitedStorage` (cache results locally), `scripting` (inject the scanner into your Instagram tab if needed), `alarms` (schedule the optional daily sync), `notifications` (show the opt-in result notification), and host access to `https://www.instagram.com/*` only.
+- Permissions used: `storage`/`unlimitedStorage` (cache results locally), `scripting` (inject the scanner into your Instagram tab if needed), `alarms` (schedule the optional daily sync), `notifications` (show the opt-in result notification), host access to `https://www.instagram.com/*`, and Instagram CDN hosts so profile pictures can load in the popup.
 
 ## Troubleshooting
 

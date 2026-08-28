@@ -14,7 +14,7 @@
  * extension load — which this page cannot remove — ignores the new traffic.
  */
 (() => {
-  const BRIDGE_VERSION = 2;
+  const BRIDGE_VERSION = 3;
   const IG_ORIGIN = 'https://www.instagram.com';
   const PING = 'IU_PAGE_PING_V2';
   const PONG = 'IU_PAGE_PONG_V2';
@@ -28,6 +28,7 @@
       const path = parsed.pathname.replace(/\/+$/, '') + '/';
       return (
         /^\/api\/v1\/friendships\/(create|destroy|remove_follower)\/[^/]+\/$/.test(path) ||
+        /^\/api\/v1\/web\/friendships\/[^/]+\/(follow|unfollow|remove_follower)\/$/.test(path) ||
         /^\/web\/friendships\/[^/]+\/(follow|unfollow|remove_follower)\/$/.test(path)
       );
     } catch {

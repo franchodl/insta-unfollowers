@@ -39,6 +39,14 @@ test('toUserRecord falls back to id and tolerates missing fields', () => {
   assert.equal(empty.isPrivate, false);
 });
 
+test('toUserRecord reads alternate profile pic and pk fields', () => {
+  assert.equal(
+    toUserRecord({ pk_id: '88', hd_profile_pic_url_info: { url: 'https://cdn.example/hd.jpg' } }).profilePicUrl,
+    'https://cdn.example/hd.jpg'
+  );
+  assert.equal(toUserRecord({ pk: { pk: '7' } }).pk, '7');
+});
+
 test('compareFollowLists finds unfollowers, fans and mutual count', () => {
   const following = [rec(1, 'zoe'), rec(2, 'bob'), rec(3, 'cat')];
   const followers = [rec(2, 'bob'), rec(3, 'cat'), rec(4, 'dan')];

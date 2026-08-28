@@ -162,7 +162,10 @@ export async function fetchUserInfo({ userId, csrfToken = null, fetchFn = global
 }
 
 function shouldFallbackFollowEndpoint(err) {
-  return err instanceof IgApiError && (err.code === 'auth' || err.code === 'bad_body');
+  if (!(err instanceof IgApiError)) return false;
+  if (err.code === 'auth' || err.code === 'bad_body') return true;
+  // Instagram has retired some friendship paths; try the next known URL.
+  return err.code === 'http' && err.status === 404;
 }
 
 function requireCsrf(csrfToken) {
@@ -199,6 +202,22 @@ async function postFriendshipWrite({ url, body, csrfToken, wwwClaim, ajaxHash, f
  * tab (see page-bridge.js). Isolated-world fetch() sends a chrome-extension
  * Origin, and Instagram answers those POSTs with an HTML login page.
  */
+function friendshipWriteUrls(targetId, follow) {
+  const id = String(targetId);
+  if (follow) {
+    return [
+      `${API_BASE}/friendships/create/${id}/`,
+      `${API_BASE}/web/friendships/${id}/follow/`,
+      `https://www.instagram.com/web/friendships/${id}/follow/`,
+    ];
+  }
+  return [
+    `${API_BASE}/friendships/destroy/${id}/`,
+    `${API_BASE}/web/friendships/${id}/unfollow/`,
+    `https://www.instagram.com/web/friendships/${id}/unfollow/`,
+  ];
+}
+
 export async function setFollowState({
   targetId,
   follow,
@@ -208,29 +227,30 @@ export async function setFollowState({
   fetchFn = globalThis.fetch,
 }) {
   requireCsrf(csrfToken);
-  const action = follow ? 'create' : 'destroy';
   const body = new URLSearchParams({
     user_id: String(targetId),
     container_module: follow ? 'profile' : 'profile_unfollow',
     radio_type: 'wifi-none',
   }).toString();
-  const args = { body, csrfToken, wwwClaim, ajaxHash, fetchFn };
-  let parsed;
-  try {
-    parsed = await postFriendshipWrite({
-      url: `${API_BASE}/friendships/${action}/${targetId}/`,
-      ...args,
-    });
-  } catch (err) {
-    if (!shouldFallbackFollowEndpoint(err)) throw err;
-    const legacy = follow ? 'follow' : 'unfollow';
-    parsed = await postFriendshipWrite({
-      url: `https://www.instagram.com/web/friendships/${targetId}/${legacy}/`,
-      ...args,
-      body: null,
-    });
+  const args = { csrfToken, wwwClaim, ajaxHash, fetchFn };
+  const urls = friendshipWriteUrls(targetId, follow);
+  let lastErr;
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const useBody = url.includes('/api/v1/friendships/') || url.includes('/api/v1/web/');
+    try {
+      const parsed = await postFriendshipWrite({
+        url,
+        body: useBody ? body : null,
+        ...args,
+      });
+      return { following: Boolean(parsed.friendship_status?.following ?? follow) };
+    } catch (err) {
+      lastErr = err;
+      if (!shouldFallbackFollowEndpoint(err) || i === urls.length - 1) throw err;
+    }
   }
-  return { following: Boolean(parsed.friendship_status?.following ?? follow) };
+  throw lastErr;
 }
 
 /**

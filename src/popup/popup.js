@@ -20,6 +20,7 @@ const state = {
   whitelist: new Set(), // pks the user chose to ignore
   unfollowedSet: new Set(), // pks unfollowed from the popup since the last scan
   removedFanSet: new Set(), // pks removed as followers from the Fans tab since the last scan
+  followedBackSet: new Set(), // pks followed from the Fans tab since the last scan
   newUnfollowerPks: new Set(), // pks that are new since the previous scan
   settings: { ...DEFAULT_SETTINGS },
   inSettings: false,
@@ -161,6 +162,7 @@ async function reloadStoredData() {
     whitelists = {},
     unfollowed = {},
     removedFans = {},
+    followedBack = {},
     settings = {},
   } = await chrome.storage.local.get([
     'scans',
@@ -168,6 +170,7 @@ async function reloadStoredData() {
     'whitelists',
     'unfollowed',
     'removedFans',
+    'followedBack',
     'settings',
   ]);
   const uid = state.userId ?? lastScanUserId;
@@ -175,6 +178,7 @@ async function reloadStoredData() {
   state.whitelist = new Set(state.scan ? (whitelists[state.scan.userId] ?? []) : []);
   state.unfollowedSet = new Set(state.scan ? (unfollowed[state.scan.userId] ?? []) : []);
   state.removedFanSet = new Set(state.scan ? (removedFans[state.scan.userId] ?? []) : []);
+  state.followedBackSet = new Set(state.scan ? (followedBack[state.scan.userId] ?? []) : []);
   state.newUnfollowerPks = new Set((state.scan?.diff?.newUnfollowers ?? []).map((u) => u.pk));
   state.settings = { ...DEFAULT_SETTINGS, ...settings };
 }
@@ -433,13 +437,15 @@ function renderTabs() {
     listFor('unfollowers').filter((u) => !state.whitelist.has(u.pk) && !state.unfollowedSet.has(u.pk)).length
   );
   $('count-fans').textContent = String(
-    listFor('fans').filter((u) => !state.whitelist.has(u.pk) && !state.removedFanSet.has(u.pk)).length
+    listFor('fans').filter(
+      (u) => !state.whitelist.has(u.pk) && !state.removedFanSet.has(u.pk) && !state.followedBackSet.has(u.pk)
+    ).length
   );
 }
 
 function hiddenByAction(u) {
   if (state.activeTab === 'unfollowers') return state.unfollowedSet.has(u.pk);
-  if (state.activeTab === 'fans') return state.removedFanSet.has(u.pk);
+  if (state.activeTab === 'fans') return state.removedFanSet.has(u.pk) || state.followedBackSet.has(u.pk);
   return false;
 }
 
@@ -465,7 +471,7 @@ function renderList() {
       ? 'No matches.'
       : afterAction.length === 0 && rawList.length > 0
         ? state.activeTab === 'fans'
-          ? 'You have removed everyone on this list. 🎉'
+          ? 'You have followed or removed everyone on this list. 🎉'
           : 'You have unfollowed everyone on this list. 🎉'
         : allIgnored
           ? `All ${afterAction.length.toLocaleString()} account${afterAction.length === 1 ? '' : 's'} here are ignored.`
@@ -532,12 +538,20 @@ function userRow(u) {
     followBtn.addEventListener('click', () => unfollowUser(u, followBtn, row));
     row.append(followBtn);
   } else if (state.activeTab === 'fans') {
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+    const followBtn = document.createElement('button');
+    followBtn.className = 'btn-follow refollow';
+    followBtn.textContent = 'Follow';
+    followBtn.title = `Follow @${u.username}`;
+    followBtn.addEventListener('click', () => followBackFan(u, followBtn, row));
     const removeBtn = document.createElement('button');
     removeBtn.className = 'btn-follow';
     removeBtn.textContent = 'Remove';
     removeBtn.title = `Remove @${u.username} as a follower`;
     removeBtn.addEventListener('click', () => removeFan(u, removeBtn, row));
-    row.append(removeBtn);
+    actions.append(followBtn, removeBtn);
+    row.append(actions);
   }
 
   const btn = document.createElement('button');
@@ -580,17 +594,45 @@ async function unfollowUser(u, btn, row) {
 }
 
 /**
+ * Follow one fan via the content script (one click, one request). On success
+ * they are no longer a one-way follower, so the row fades out like Remove.
+ */
+async function followBackFan(u, btn, row) {
+  for (const b of row.querySelectorAll('.btn-follow')) b.disabled = true;
+  btn.textContent = 'Following…';
+  if (state.tabId === null) state.tabId = await findInstagramTabId();
+  const res = await sendToTab({ type: 'IU_SET_FOLLOW', pk: u.pk, follow: true });
+  if (!res?.ok) {
+    for (const b of row.querySelectorAll('.btn-follow')) b.disabled = false;
+    btn.textContent = 'Follow';
+    showToast([res?.error ?? 'Could not reach your Instagram tab. Open instagram.com and try again.'], true);
+    return;
+  }
+  state.followedBackSet.add(u.pk);
+  const uid = state.scan?.userId;
+  if (uid !== null && uid !== undefined) {
+    const { followedBack = {} } = await chrome.storage.local.get('followedBack');
+    followedBack[uid] = [...state.followedBackSet];
+    await chrome.storage.local.set({ followedBack });
+  }
+  showToast([
+    res.following === false ? `Follow request sent to @${u.username}.` : `Followed @${u.username}.`,
+  ]);
+  fadeAndRemoveRow(row, () => renderList());
+}
+
+/**
  * Remove one follower via the content script (one click, one request). On
  * success the row fades out like Unfollow; the pk is remembered until the
  * next scan so it doesn't reappear on re-render.
  */
 async function removeFan(u, btn, row) {
-  btn.disabled = true;
+  for (const b of row.querySelectorAll('.btn-follow')) b.disabled = true;
   btn.textContent = 'Removing…';
   if (state.tabId === null) state.tabId = await findInstagramTabId();
   const res = await sendToTab({ type: 'IU_REMOVE_FOLLOWER', pk: u.pk });
   if (!res?.ok) {
-    btn.disabled = false;
+    for (const b of row.querySelectorAll('.btn-follow')) b.disabled = false;
     btn.textContent = 'Remove';
     showToast([res?.error ?? 'Could not reach your Instagram tab. Open instagram.com and try again.'], true);
     return;
@@ -634,12 +676,16 @@ function fadeAndRemoveRow(row, done) {
 // Only load avatars from Instagram's own CDNs, in case a scan record ever
 // carries a tampered URL.
 function isInstagramCdnUrl(value) {
-  if (typeof value !== 'string') return false;
+  if (typeof value !== 'string' || !value) return false;
   try {
     const url = new URL(value);
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
     return (
-      url.protocol === 'https:' &&
-      (url.hostname.endsWith('.cdninstagram.com') || url.hostname.endsWith('.fbcdn.net'))
+      host === 'cdninstagram.com' ||
+      host.endsWith('.cdninstagram.com') ||
+      host === 'fbcdn.net' ||
+      host.endsWith('.fbcdn.net')
     );
   } catch {
     return false;
@@ -649,22 +695,29 @@ function isInstagramCdnUrl(value) {
 function avatarFor(u) {
   const wrap = document.createElement('div');
   wrap.className = 'avatar';
-  const fallback = () => {
-    wrap.textContent = (u.username?.[0] ?? '?').toUpperCase();
-  };
-  if (isInstagramCdnUrl(u.profilePicUrl)) {
-    const img = document.createElement('img');
-    img.referrerPolicy = 'no-referrer';
-    img.alt = '';
-    img.addEventListener('error', () => {
-      img.remove();
-      fallback();
+  wrap.textContent = (u.username?.[0] ?? '?').toUpperCase();
+  const picUrl = u.profilePicUrl;
+  if (!isInstagramCdnUrl(picUrl)) return wrap;
+
+  // Instagram CDNs often refuse <img> loads from chrome-extension pages
+  // (CORP / Referer). Fetching with host permissions and showing a blob
+  // URL works; the letter stays until the image arrives.
+  fetch(picUrl, { credentials: 'omit', referrerPolicy: 'no-referrer' })
+    .then((res) => {
+      if (!res.ok) throw new Error('avatar http');
+      return res.blob();
+    })
+    .then((blob) => {
+      if (!blob.type.startsWith('image/')) throw new Error('avatar type');
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = URL.createObjectURL(blob);
+      wrap.textContent = '';
+      wrap.append(img);
+    })
+    .catch(() => {
+      // Keep the initial. URLs also expire; a rescan refreshes them.
     });
-    img.src = u.profilePicUrl;
-    wrap.append(img);
-  } else {
-    fallback();
-  }
   return wrap;
 }
 

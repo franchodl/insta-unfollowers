@@ -456,9 +456,21 @@ h1, h2, p {
   color: #fff;
 }
 
+.btn-follow.refollow:hover {
+  filter: brightness(1.06);
+  background: var(--gradient);
+  color: #fff;
+}
+
 .btn-follow:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
 }
 
 .badge-new {
