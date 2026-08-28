@@ -3,10 +3,32 @@
  * in Node (see tests/compare.test.mjs).
  */
 
+/**
+ * Instagram user ids must stay strings. JSON `pk` is often a Number, which
+ * silently rounds values past Number.MAX_SAFE_INTEGER and then 404s on follow.
+ * Prefer the dedicated string fields when they exist.
+ */
+export function pickUserPk(raw) {
+  if (raw == null || typeof raw !== 'object') return '';
+  for (const value of [raw.pk_id, raw.id, raw.strong_id__]) {
+    if (value == null || value === '') continue;
+    if (typeof value === 'object') {
+      const nested = pickUserPk(value);
+      if (nested) return nested;
+      continue;
+    }
+    const asString = String(value);
+    if (asString && asString !== 'undefined' && asString !== 'null') return asString;
+  }
+  let pk = raw.pk;
+  if (pk && typeof pk === 'object') return pickUserPk(pk);
+  if (pk == null || pk === '') return '';
+  return String(pk);
+}
+
 /** Normalize a raw Instagram API user object into the record we store. */
 export function toUserRecord(raw) {
-  let pk = raw?.pk ?? raw?.id ?? raw?.pk_id ?? raw?.strong_id__ ?? '';
-  if (pk && typeof pk === 'object') pk = pk.pk ?? pk.id ?? '';
+  const pk = pickUserPk(raw);
   const profilePicUrl =
     raw?.profile_pic_url ||
     raw?.profile_pic_url_hd ||

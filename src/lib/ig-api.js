@@ -162,10 +162,11 @@ export async function fetchUserInfo({ userId, csrfToken = null, fetchFn = global
 }
 
 function shouldFallbackFollowEndpoint(err) {
+  if (err && /Blocked unexpected Instagram URL/i.test(err.message)) return true;
   if (!(err instanceof IgApiError)) return false;
-  if (err.code === 'auth' || err.code === 'bad_body') return true;
+  if (err.code === 'rate_limit') return false;
   // Instagram has retired some friendship paths; try the next known URL.
-  return err.code === 'http' && err.status === 404;
+  return err.code === 'auth' || err.code === 'bad_body' || err.code === 'http';
 }
 
 function requireCsrf(csrfToken) {
@@ -209,6 +210,8 @@ function friendshipWriteUrls(targetId, follow) {
       `${API_BASE}/friendships/create/${id}/`,
       `${API_BASE}/web/friendships/${id}/follow/`,
       `https://www.instagram.com/web/friendships/${id}/follow/`,
+      `${API_BASE}/friendships/follow/${id}/`,
+      `${API_BASE}/friendships/create/`,
     ];
   }
   return [

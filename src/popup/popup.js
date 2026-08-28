@@ -109,29 +109,40 @@ async function findInstagramTabId() {
   return best.id ?? null;
 }
 
+async function injectPageScripts(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['src/content/page-bridge.js'],
+    world: 'MAIN',
+  });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['src/content/content.js'] });
+}
+
 async function getContentState(tabId) {
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'IU_GET_STATE' });
+    const res = await chrome.tabs.sendMessage(tabId, { type: 'IU_GET_STATE_V5' });
+    if (res?.ok) return res;
   } catch {
-    // Content script not there yet (e.g. extension installed after the tab
-    // loaded) — inject it and retry once.
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['src/content/page-bridge.js'],
-        world: 'MAIN',
-      });
-      await chrome.scripting.executeScript({ target: { tabId }, files: ['src/content/content.js'] });
-      return await chrome.tabs.sendMessage(tabId, { type: 'IU_GET_STATE' });
-    } catch {
-      return null;
-    }
+    // Content script missing or still the previous version.
+  }
+  try {
+    await injectPageScripts(tabId);
+    return await chrome.tabs.sendMessage(tabId, { type: 'IU_GET_STATE_V5' });
+  } catch {
+    return null;
   }
 }
 
 async function sendToTab(message) {
   if (state.tabId === null) return null;
   try {
+    const res = await chrome.tabs.sendMessage(state.tabId, message);
+    if (res != null) return res;
+  } catch {
+    // Fall through and inject a current content script.
+  }
+  try {
+    await injectPageScripts(state.tabId);
     return await chrome.tabs.sendMessage(state.tabId, message);
   } catch {
     return null;
@@ -214,7 +225,7 @@ async function startScan() {
       state.userId = res.userId ?? state.userId;
     }
   }
-  const res = await sendToTab({ type: 'IU_START_SCAN' });
+  const res = await sendToTab({ type: 'IU_START_SCAN_V5' });
   if (!res?.ok) {
     renderError(res?.error ?? 'Could not start the scan. Reload your Instagram tab and try again.');
     return;
@@ -233,7 +244,7 @@ async function cancelScan() {
   state.cancelPending = true;
   $('btn-cancel').disabled = true;
   $('btn-cancel').textContent = 'Cancelling…';
-  await sendToTab({ type: 'IU_CANCEL_SCAN' });
+  await sendToTab({ type: 'IU_CANCEL_SCAN_V5' });
 }
 
 function switchTab(tab) {
@@ -575,7 +586,7 @@ async function unfollowUser(u, btn, row) {
   btn.disabled = true;
   btn.textContent = 'Unfollowing…';
   if (state.tabId === null) state.tabId = await findInstagramTabId();
-  const res = await sendToTab({ type: 'IU_SET_FOLLOW', pk: u.pk, follow: false });
+  const res = await sendToTab({ type: 'IU_SET_FOLLOW_V5', pk: u.pk, username: u.username, follow: false });
   if (!res?.ok) {
     btn.disabled = false;
     btn.textContent = 'Unfollow';
@@ -601,7 +612,7 @@ async function followBackFan(u, btn, row) {
   for (const b of row.querySelectorAll('.btn-follow')) b.disabled = true;
   btn.textContent = 'Following…';
   if (state.tabId === null) state.tabId = await findInstagramTabId();
-  const res = await sendToTab({ type: 'IU_SET_FOLLOW', pk: u.pk, follow: true });
+  const res = await sendToTab({ type: 'IU_SET_FOLLOW_V5', pk: u.pk, username: u.username, follow: true });
   if (!res?.ok) {
     for (const b of row.querySelectorAll('.btn-follow')) b.disabled = false;
     btn.textContent = 'Follow';
@@ -630,7 +641,7 @@ async function removeFan(u, btn, row) {
   for (const b of row.querySelectorAll('.btn-follow')) b.disabled = true;
   btn.textContent = 'Removing…';
   if (state.tabId === null) state.tabId = await findInstagramTabId();
-  const res = await sendToTab({ type: 'IU_REMOVE_FOLLOWER', pk: u.pk });
+  const res = await sendToTab({ type: 'IU_REMOVE_FOLLOWER_V5', pk: u.pk });
   if (!res?.ok) {
     for (const b of row.querySelectorAll('.btn-follow')) b.disabled = false;
     btn.textContent = 'Remove';

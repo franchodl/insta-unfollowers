@@ -47,6 +47,11 @@ test('toUserRecord reads alternate profile pic and pk fields', () => {
   assert.equal(toUserRecord({ pk: { pk: '7' } }).pk, '7');
 });
 
+test('toUserRecord prefers string pk_id over numeric pk', () => {
+  assert.equal(toUserRecord({ pk: 1, pk_id: '999' }).pk, '999');
+  assert.equal(toUserRecord({ pk: Number.MAX_SAFE_INTEGER + 2, pk_id: '9007199254740993' }).pk, '9007199254740993');
+});
+
 test('compareFollowLists finds unfollowers, fans and mutual count', () => {
   const following = [rec(1, 'zoe'), rec(2, 'bob'), rec(3, 'cat')];
   const followers = [rec(2, 'bob'), rec(3, 'cat'), rec(4, 'dan')];

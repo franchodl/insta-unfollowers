@@ -213,6 +213,20 @@ test('setFollowState retries follow on HTTP 404 using the web follow endpoint', 
   assert.equal(calls[1], 'https://www.instagram.com/api/v1/web/friendships/9/follow/');
 });
 
+test('setFollowState keeps trying later follow URLs when earlier ones 404', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('/friendships/create/') || url.includes('/web/friendships/')) {
+      return jsonResponse({}, { status: 404 });
+    }
+    return jsonResponse({ status: 'ok', friendship_status: { following: true } });
+  };
+  const result = await setFollowState({ targetId: '9', follow: true, csrfToken: 'CSRF', fetchFn });
+  assert.equal(result.following, true);
+  assert.ok(calls.some((url) => url.includes('/friendships/follow/9/')));
+});
+
 test('setFollowState turns an HTML login/redirect response into an actionable auth error', async () => {
   const fetchFn = async () => htmlResponse('<!DOCTYPE html><html><body>Log in</body></html>');
   await assert.rejects(

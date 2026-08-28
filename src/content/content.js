@@ -4,10 +4,14 @@
  * it keeps running even if the popup closes.
  *
  * Loaded both via the manifest and, as a fallback, programmatically from the
- * popup, so it must guard against double injection.
+ * popup. The versioned guard lets a newer extension load replace a stale
+ * listener left behind after chrome://extensions → Reload (the Instagram tab
+ * is not always refreshed).
  */
 (() => {
-  if (window.__instaUnfollowersLoaded) return;
+  const CONTENT_VERSION = 5;
+  if (window.__iuContentVersion >= CONTENT_VERSION) return;
+  window.__iuContentVersion = CONTENT_VERSION;
   window.__instaUnfollowersLoaded = true;
 
   // Library modules are proper ES modules (listed in web_accessible_resources)
@@ -81,23 +85,32 @@
     });
   }
 
-  async function setFollow(pk, follow) {
+  function writeHeaders(api) {
+    const headers = {
+      'x-ig-app-id': api.IG_APP_ID,
+      'x-asbd-id': api.IG_ASBD_ID,
+      'x-requested-with': 'XMLHttpRequest',
+      accept: 'application/json',
+    };
+    const csrf = api.getCookie('csrftoken');
+    if (csrf) headers['x-csrftoken'] = csrf;
+    const claim = getWwwClaim();
+    if (claim) headers['x-ig-www-claim'] = claim;
+    headers['x-instagram-ajax'] = getRolloutHash();
+    return headers;
+  }
+
+  async function setFollow(pk, follow, username) {
     const { api } = await libReady;
     if (!api.getCookie('ds_user_id')) {
       return { ok: false, error: 'You are not logged in to Instagram in this tab.' };
     }
-    if (!pk) {
+    if (!pk && !username) {
       return { ok: false, error: 'Missing account id — rescan and try again.' };
     }
     try {
-      const result = await api.setFollowState({
-        targetId: pk,
-        follow,
-        csrfToken: api.getCookie('csrftoken'),
-        wwwClaim: getWwwClaim(),
-        ajaxHash: getRolloutHash(),
-        fetchFn: pageWorldFetch,
-      });
+      const result = await pageWorldFriendship(follow ? 'follow' : 'unfollow', pk, writeHeaders(api), username);
+      if (!result?.ok) return { ok: false, error: result?.error ?? 'Instagram rejected the request.' };
       return { ok: true, following: result.following };
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
@@ -113,13 +126,8 @@
       return { ok: false, error: 'Missing account id — rescan and try again.' };
     }
     try {
-      await api.removeFollower({
-        targetId: pk,
-        csrfToken: api.getCookie('csrftoken'),
-        wwwClaim: getWwwClaim(),
-        ajaxHash: getRolloutHash(),
-        fetchFn: pageWorldFetch,
-      });
+      const result = await pageWorldFriendship('remove', pk, writeHeaders(api));
+      if (!result?.ok) return { ok: false, error: result?.error ?? 'Instagram rejected the request.' };
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err?.message ?? String(err) };
@@ -167,7 +175,7 @@
         if (event.data?.type !== 'IU_PAGE_PONG_V2' || event.data?.id !== id) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
-        resolve(Number(event.data.version) >= 3);
+        resolve(Number(event.data.version) >= 5);
       }
       window.addEventListener('message', onMessage);
       postToPage({ type: 'IU_PAGE_PING_V2', id });
@@ -192,47 +200,30 @@
     throw new Error('Could not reach Instagram in this tab. Reload the instagram.com tab and try again.');
   }
 
-  async function pageWorldFetch(url, options = {}) {
+  async function pageWorldFriendship(action, targetId, headers, username) {
     await ensurePageBridge();
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID();
       const timer = setTimeout(() => {
         window.removeEventListener('message', onMessage);
         reject(new Error('Instagram did not respond. Reload the instagram.com tab and try again.'));
-      }, 20000);
+      }, 40000);
       function onMessage(event) {
         if (event.source !== window) return;
         const data = event.data;
-        if (!data || data.type !== 'IU_PAGE_FETCH_RESULT_V2' || data.id !== id) return;
+        if (!data || data.type !== 'IU_PAGE_FRIENDSHIP_RESULT_V5' || data.id !== id) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
-        if (data.error) {
-          reject(new Error(data.error));
-          return;
-        }
-        resolve({
-          ok: Boolean(data.ok),
-          status: data.status ?? 0,
-          url: data.url ?? url,
-          redirected: Boolean(data.redirected),
-          json: async () => {
-            if (data.json != null) return data.json;
-            throw new SyntaxError('Unexpected token');
-          },
-          text: async () => data.text ?? '',
-          clone() {
-            return this;
-          },
-        });
+        resolve(data);
       }
       window.addEventListener('message', onMessage);
       postToPage({
-        type: 'IU_PAGE_FETCH_V2',
+        type: 'IU_PAGE_FRIENDSHIP_V5',
         id,
-        url,
-        method: options.method || 'POST',
-        headers: options.headers || {},
-        body: options.body || null,
+        action,
+        targetId: String(targetId || ''),
+        username: String(username || ''),
+        headers: headers || {},
       });
     });
   }
@@ -327,14 +318,21 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     switch (message?.type) {
-      case 'IU_GET_STATE':
+      case 'IU_GET_STATE_V5':
         libReady
-          .then(({ api }) => sendResponse({ ok: true, state, userId: api.getCookie('ds_user_id') }))
+          .then(({ api }) =>
+            sendResponse({
+              ok: true,
+              state,
+              userId: api.getCookie('ds_user_id'),
+              version: CONTENT_VERSION,
+            })
+          )
           .catch(() =>
             sendResponse({ ok: false, error: 'Extension failed to initialise on this page. Reload the tab.' })
           );
         return true; // keep the message channel open for the async response
-      case 'IU_START_SCAN':
+      case 'IU_START_SCAN_V5':
         if (state.status === 'scanning') {
           sendResponse({ ok: false, error: 'A scan is already running.' });
         } else {
@@ -342,14 +340,16 @@
           sendResponse({ ok: true });
         }
         return false;
-      case 'IU_CANCEL_SCAN':
+      case 'IU_CANCEL_SCAN_V5':
         cancelRequested = true;
         sendResponse({ ok: true });
         return false;
-      case 'IU_SET_FOLLOW':
-        setFollow(String(message.pk ?? ''), Boolean(message.follow)).then(sendResponse);
+      case 'IU_SET_FOLLOW_V5':
+        setFollow(String(message.pk ?? ''), Boolean(message.follow), String(message.username ?? '')).then(
+          sendResponse
+        );
         return true;
-      case 'IU_REMOVE_FOLLOWER':
+      case 'IU_REMOVE_FOLLOWER_V5':
         removeFan(String(message.pk ?? '')).then(sendResponse);
         return true;
       default:

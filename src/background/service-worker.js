@@ -205,7 +205,7 @@ async function maybeDailySync() {
   await chrome.storage.session.set({ syncTabId: tabId, syncTabCreated: created });
 
   const ready = await waitForContentScript(tabId);
-  const res = ready ? await sendMessageSafe(tabId, { type: 'IU_START_SCAN', source: 'daily' }) : null;
+  const res = ready ? await sendMessageSafe(tabId, { type: 'IU_START_SCAN_V5', source: 'daily' }) : null;
   if (!res?.ok) {
     await chrome.storage.session.remove(['syncTabId', 'syncTabCreated']);
     const settings2 = await getSettings();
@@ -231,7 +231,7 @@ async function waitForContentScript(tabId, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   let injected = false;
   while (Date.now() < deadline) {
-    const res = await sendMessageSafe(tabId, { type: 'IU_GET_STATE' });
+    const res = await sendMessageSafe(tabId, { type: 'IU_GET_STATE_V5' });
     if (res?.ok) return true;
     if (!injected) {
       try {
