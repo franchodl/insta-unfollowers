@@ -1,0 +1,21 @@
+{
+  "name": "insta-unfollowers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that shows Instagram accounts you follow that don't follow you back.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "icons": "python3 scripts/generate-icons.py icons",
+    "package": "scripts/package.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "franchodl",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:franchodl/insta-unfollowers.git"
+  },
+  "license": "MIT"
+}

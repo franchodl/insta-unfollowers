@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Insta Unfollowers",
+  "version": "1.0.0",
+  "description": "See who you follow on Instagram that doesn't follow you back. Runs 100% locally using your own logged-in session.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Insta Unfollowers",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": ["storage", "unlimitedStorage", "scripting", "alarms", "notifications"],
+  "host_permissions": ["https://www.instagram.com/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["src/content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/lib/*.js"],
+      "matches": ["https://www.instagram.com/*"]
+    }
+  ]
+}

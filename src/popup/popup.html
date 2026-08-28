@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Insta Unfollowers</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="app-header">
+    <img src="../../icons/icon32.png" alt="" class="logo">
+    <div class="titles">
+      <h1>Insta Unfollowers</h1>
+      <p id="subtitle" class="subtitle">Who doesn&rsquo;t follow you back</p>
+    </div>
+    <button id="btn-settings" class="btn-icon" title="Settings" aria-label="Settings">&#9881;&#65039;</button>
+  </header>
+
+  <main id="main">
+    <section id="view-loading" class="view view-center" hidden>
+      <div class="spinner"></div>
+      <p class="muted">Connecting&hellip;</p>
+    </section>
+
+    <section id="view-no-tab" class="view view-center" hidden>
+      <p class="big-emoji">&#128247;</p>
+      <h2>Open Instagram to start</h2>
+      <p class="muted">
+        This extension works inside your logged-in Instagram tab.
+        Nothing is sent anywhere &mdash; the scan runs locally in your browser.
+      </p>
+      <button id="btn-open-instagram" class="btn btn-primary">Open instagram.com</button>
+    </section>
+
+    <section id="view-empty" class="view view-center" hidden>
+      <p class="big-emoji">&#128269;</p>
+      <h2>Ready to scan</h2>
+      <p class="muted">
+        Scans the accounts you follow and your followers, then shows who
+        doesn&rsquo;t follow you back.
+      </p>
+      <button id="btn-scan" class="btn btn-primary">Scan my account</button>
+    </section>
+
+    <section id="view-scanning" class="view" hidden>
+      <h2 id="scan-phase">Scanning&hellip;</h2>
+      <div class="progress-group">
+        <label>Following <span id="following-count" class="progress-count"></span></label>
+        <div class="bar"><div id="bar-following" class="bar-fill"></div></div>
+        <label>Followers <span id="followers-count" class="progress-count"></span></label>
+        <div class="bar"><div id="bar-followers" class="bar-fill"></div></div>
+      </div>
+      <p class="muted" id="scan-note"></p>
+      <button id="btn-cancel" class="btn btn-secondary">Cancel</button>
+    </section>
+
+    <section id="view-error" class="view view-center" hidden>
+      <p class="big-emoji">&#9888;&#65039;</p>
+      <h2>Something went wrong</h2>
+      <p id="error-message" class="muted"></p>
+      <button id="btn-retry" class="btn btn-primary">Try again</button>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <h2 class="settings-title">Settings</h2>
+      <label class="setting">
+        <input type="checkbox" id="opt-daily-sync">
+        <span class="setting-text">
+          <strong>Daily sync</strong>
+          <span>Once a day while Chrome is open, rescan automatically — using your open
+          Instagram tab, or briefly opening one in the background.</span>
+        </span>
+      </label>
+      <label class="setting">
+        <input type="checkbox" id="opt-notify">
+        <span class="setting-text">
+          <strong>Notify results</strong>
+          <span>After a background sync, show a system notification with your totals and
+          what changed since the last sync.</span>
+        </span>
+      </label>
+      <div class="settings-actions">
+        <button id="btn-clear-data" class="btn btn-secondary">Delete all stored data</button>
+        <button id="btn-settings-back" class="btn btn-primary">Back</button>
+      </div>
+    </section>
+
+    <section id="view-results" class="view view-results" hidden>
+      <div id="summary" class="summary"></div>
+      <p id="diff-banner" class="diff-banner" hidden></p>
+      <div class="tabs">
+        <button id="tab-unfollowers" class="tab active">
+          Don&rsquo;t follow back <span id="count-unfollowers" class="pill"></span>
+        </button>
+        <button id="tab-fans" class="tab">
+          Fans <span id="count-fans" class="pill"></span>
+        </button>
+      </div>
+      <input id="search" type="search" placeholder="Filter by name or username&hellip;" autocomplete="off">
+      <div id="list" class="list"></div>
+      <div class="results-footer">
+        <label class="toggle"><input type="checkbox" id="show-ignored"> Show ignored</label>
+        <div class="spacer"></div>
+        <button id="btn-export" class="btn btn-secondary">Export CSV</button>
+        <button id="btn-rescan" class="btn btn-primary">Rescan</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">Local only &mdash; no data leaves your browser</footer>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
