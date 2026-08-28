@@ -415,13 +415,15 @@ function renderTabs() {
   $('tab-unfollowers').classList.toggle('active', state.activeTab === 'unfollowers');
   $('tab-fans').classList.toggle('active', state.activeTab === 'fans');
   $('count-unfollowers').textContent = String(
-    listFor('unfollowers').filter((u) => !state.whitelist.has(u.pk)).length
+    listFor('unfollowers').filter((u) => !state.whitelist.has(u.pk) && !state.unfollowedSet.has(u.pk)).length
   );
   $('count-fans').textContent = String(listFor('fans').filter((u) => !state.whitelist.has(u.pk)).length);
 }
 
 function visibleUsers() {
   let users = listFor(state.activeTab);
+  // Accounts unfollowed from here are dropped from the unfollowers list.
+  if (state.activeTab === 'unfollowers') users = users.filter((u) => !state.unfollowedSet.has(u.pk));
   if (!state.showIgnored) users = users.filter((u) => !state.whitelist.has(u.pk));
   return filterUsers(users, state.query);
 }
@@ -431,16 +433,24 @@ function renderList() {
   container.textContent = '';
   const users = visibleUsers();
   if (users.length === 0) {
-    const rawCount = listFor(state.activeTab).length;
+    const rawList = listFor(state.activeTab);
+    const afterUnfollow =
+      state.activeTab === 'unfollowers'
+        ? rawList.filter((u) => !state.unfollowedSet.has(u.pk))
+        : rawList;
+    const allIgnored =
+      afterUnfollow.length > 0 && afterUnfollow.every((u) => state.whitelist.has(u.pk));
     const empty = document.createElement('p');
     empty.className = 'list-empty';
     empty.textContent = state.query
       ? 'No matches.'
-      : rawCount > 0
-        ? `All ${rawCount.toLocaleString()} account${rawCount === 1 ? '' : 's'} here are ignored.`
-        : state.activeTab === 'unfollowers'
-          ? 'Everyone you follow follows you back. 🎉'
-          : 'No accounts here.';
+      : afterUnfollow.length === 0 && rawList.length > 0
+        ? 'You have unfollowed everyone on this list. 🎉'
+        : allIgnored
+          ? `All ${afterUnfollow.length.toLocaleString()} account${afterUnfollow.length === 1 ? '' : 's'} here are ignored.`
+          : state.activeTab === 'unfollowers'
+            ? 'Everyone you follow follows you back. 🎉'
+            : 'No accounts here.';
     container.append(empty);
   }
   for (const u of users.slice(0, state.renderLimit)) container.append(userRow(u));
@@ -494,14 +504,11 @@ function userRow(u) {
   row.append(info);
 
   if (state.activeTab === 'unfollowers') {
-    const wasUnfollowed = state.unfollowedSet.has(u.pk);
     const followBtn = document.createElement('button');
-    followBtn.className = wasUnfollowed ? 'btn-follow refollow' : 'btn-follow';
-    followBtn.textContent = wasUnfollowed ? 'Follow' : 'Unfollow';
-    followBtn.title = wasUnfollowed
-      ? `Follow @${u.username} again`
-      : `Unfollow @${u.username} on Instagram`;
-    followBtn.addEventListener('click', () => setFollowFor(u, wasUnfollowed, followBtn));
+    followBtn.className = 'btn-follow';
+    followBtn.textContent = 'Unfollow';
+    followBtn.title = `Unfollow @${u.username} on Instagram`;
+    followBtn.addEventListener('click', () => unfollowUser(u, followBtn, row));
     row.append(followBtn);
   }
 
@@ -517,29 +524,56 @@ function userRow(u) {
   return row;
 }
 
-/** Follow or unfollow one account via the content script (one click, one request). */
-async function setFollowFor(u, follow, btn) {
-  const original = btn.textContent;
+/**
+ * Unfollow one account via the content script (one click, one request). On
+ * success the row fades out and is removed from the list; the pk is remembered
+ * (until the next scan) so it doesn't reappear on re-render.
+ */
+async function unfollowUser(u, btn, row) {
   btn.disabled = true;
-  btn.textContent = follow ? 'Following…' : 'Unfollowing…';
+  btn.textContent = 'Unfollowing…';
   if (state.tabId === null) state.tabId = await findInstagramTabId();
-  const res = await sendToTab({ type: 'IU_SET_FOLLOW', pk: u.pk, follow });
+  const res = await sendToTab({ type: 'IU_SET_FOLLOW', pk: u.pk, follow: false });
   if (!res?.ok) {
     btn.disabled = false;
-    btn.textContent = original;
+    btn.textContent = 'Unfollow';
     showToast([res?.error ?? 'Could not reach your Instagram tab. Open instagram.com and try again.'], true);
     return;
   }
-  if (follow) state.unfollowedSet.delete(u.pk);
-  else state.unfollowedSet.add(u.pk);
+  state.unfollowedSet.add(u.pk);
   const uid = state.scan?.userId;
   if (uid !== null && uid !== undefined) {
     const { unfollowed = {} } = await chrome.storage.local.get('unfollowed');
     unfollowed[uid] = [...state.unfollowedSet];
     await chrome.storage.local.set({ unfollowed });
   }
-  showToast([follow ? `You are following @${u.username} again.` : `Unfollowed @${u.username}.`]);
-  renderList();
+  showToast([`Unfollowed @${u.username}.`]);
+  fadeAndRemoveRow(row, () => renderList());
+}
+
+/** Fade/collapse a row out, then run `done` (which re-renders the list). */
+function fadeAndRemoveRow(row, done) {
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  if (reduce) {
+    row.remove();
+    done?.();
+    return;
+  }
+  // Lock current height so the collapse transition has somewhere to go from.
+  row.style.maxHeight = `${row.offsetHeight}px`;
+  // Next frame: add the class that transitions height/opacity to zero.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => row.classList.add('row-removing'));
+  });
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    row.remove();
+    done?.();
+  };
+  row.addEventListener('transitionend', finish, { once: true });
+  setTimeout(finish, 500); // fallback if transitionend never fires
 }
 
 // Only load avatars from Instagram's own CDNs, in case a scan record ever

@@ -80,11 +80,23 @@
     if (!api.getCookie('ds_user_id')) {
       return { ok: false, error: 'You are not logged in to Instagram in this tab.' };
     }
+    if (!pk) {
+      return { ok: false, error: 'Missing account id — rescan and try again.' };
+    }
+    // Instagram's web app sends this claim (kept in the page's sessionStorage)
+    // on write requests; content scripts share the page's same-origin storage.
+    let wwwClaim = null;
+    try {
+      wwwClaim = window.sessionStorage.getItem('www-claim-v2');
+    } catch {
+      // sessionStorage may be blocked; the request usually still succeeds.
+    }
     try {
       const result = await api.setFollowState({
         targetId: pk,
         follow,
         csrfToken: api.getCookie('csrftoken'),
+        wwwClaim,
       });
       return { ok: true, following: result.following };
     } catch (err) {

@@ -13,6 +13,8 @@ import { toUserRecord } from './compare.js';
 
 // App id Instagram's own web client sends; required by the api/v1 endpoints.
 export const IG_APP_ID = '936619743392459';
+// A near-constant the web client sends on every XHR; harmless if slightly stale.
+export const IG_ASBD_ID = '129477';
 export const PAGE_SIZE = 100;
 const API_BASE = 'https://www.instagram.com/api/v1';
 
@@ -49,9 +51,18 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildHeaders(csrfToken) {
-  const headers = { 'x-ig-app-id': IG_APP_ID, accept: 'application/json' };
+function buildHeaders(csrfToken, { wwwClaim = null } = {}) {
+  // Mirror the headers Instagram's own web client sends. In particular
+  // x-requested-with: XMLHttpRequest makes Instagram answer POST actions with
+  // JSON instead of redirecting to an HTML page.
+  const headers = {
+    'x-ig-app-id': IG_APP_ID,
+    'x-asbd-id': IG_ASBD_ID,
+    'x-requested-with': 'XMLHttpRequest',
+    accept: 'application/json',
+  };
   if (csrfToken) headers['x-csrftoken'] = csrfToken;
+  if (wwwClaim) headers['x-ig-www-claim'] = wwwClaim;
   return headers;
 }
 
@@ -79,9 +90,29 @@ function throwForStatus(res) {
 }
 
 async function parseJson(res) {
+  // Clone up front so we can inspect the raw body if json() fails (a response
+  // body can only be read once). Only the failure path actually reads it.
+  const clone = typeof res.clone === 'function' ? res.clone() : null;
   try {
     return await res.json();
   } catch {
+    let raw = null;
+    if (clone) {
+      try {
+        raw = await clone.text();
+      } catch {
+        raw = null;
+      }
+    }
+    const looksHtml = typeof raw === 'string' && /^\s*<(?:!doctype|html)/i.test(raw.trim());
+    const redirectedToLogin =
+      Boolean(res.redirected) || (typeof res.url === 'string' && /\/accounts\/login/i.test(res.url));
+    if (looksHtml || redirectedToLogin) {
+      throw new IgApiError(
+        'Instagram redirected to a login or security-check page. Open your instagram.com tab, make sure you are fully logged in (and clear any verification prompt), then try again.',
+        { code: 'auth' }
+      );
+    }
     throw new IgApiError('Instagram returned a non-JSON response.', { code: 'bad_body' });
   }
 }
@@ -137,13 +168,22 @@ export async function setFollowState({
   targetId,
   follow,
   csrfToken = null,
+  wwwClaim = null,
   fetchFn = globalThis.fetch,
 }) {
+  // The write endpoints reject requests without the CSRF token (they return an
+  // HTML page, not JSON) — fail early with a clear, actionable message.
+  if (!csrfToken) {
+    throw new IgApiError(
+      'Missing Instagram security token. Reload your instagram.com tab and try again.',
+      { code: 'auth' }
+    );
+  }
   const action = follow ? 'create' : 'destroy';
   const res = await fetchFn(`${API_BASE}/friendships/${action}/${targetId}/`, {
     method: 'POST',
     headers: {
-      ...buildHeaders(csrfToken),
+      ...buildHeaders(csrfToken, { wwwClaim }),
       'content-type': 'application/x-www-form-urlencoded',
     },
     body: 'container_module=self_unified_follow_lists',

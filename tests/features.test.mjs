@@ -123,18 +123,41 @@ function jsonResponse(body, { status = 200 } = {}) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
-test('setFollowState unfollow POSTs to friendships/destroy', async () => {
+function htmlResponse(html, { status = 200, url = '', redirected = false } = {}) {
+  const make = () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    url,
+    redirected,
+    json: async () => {
+      throw new SyntaxError('Unexpected token < in JSON');
+    },
+    text: async () => html,
+    clone: () => make(),
+  });
+  return make();
+}
+
+test('setFollowState unfollow POSTs to friendships/destroy with the web-client headers', async () => {
   const calls = [];
   const fetchFn = async (url, options) => {
     calls.push({ url, options });
     return jsonResponse({ status: 'ok', friendship_status: { following: false } });
   };
-  const result = await setFollowState({ targetId: '77', follow: false, csrfToken: 'CSRF', fetchFn });
+  const result = await setFollowState({
+    targetId: '77',
+    follow: false,
+    csrfToken: 'CSRF',
+    wwwClaim: 'CLAIM',
+    fetchFn,
+  });
   assert.equal(result.following, false);
   assert.equal(calls[0].url, 'https://www.instagram.com/api/v1/friendships/destroy/77/');
   assert.equal(calls[0].options.method, 'POST');
   assert.equal(calls[0].options.headers['x-ig-app-id'], IG_APP_ID);
   assert.equal(calls[0].options.headers['x-csrftoken'], 'CSRF');
+  assert.equal(calls[0].options.headers['x-requested-with'], 'XMLHttpRequest');
+  assert.equal(calls[0].options.headers['x-ig-www-claim'], 'CLAIM');
   assert.equal(calls[0].options.headers['content-type'], 'application/x-www-form-urlencoded');
   assert.equal(calls[0].options.credentials, 'include');
 });
@@ -145,22 +168,57 @@ test('setFollowState follow POSTs to friendships/create', async () => {
     seenUrl = url;
     return jsonResponse({ status: 'ok', friendship_status: { following: true } });
   };
-  const result = await setFollowState({ targetId: '77', follow: true, fetchFn });
+  const result = await setFollowState({ targetId: '77', follow: true, csrfToken: 'CSRF', fetchFn });
   assert.equal(result.following, true);
   assert.equal(seenUrl, 'https://www.instagram.com/api/v1/friendships/create/77/');
 });
 
-test('setFollowState surfaces auth and rate-limit errors', async () => {
+test('setFollowState requires a CSRF token and does not fire the request without one', async () => {
+  let called = false;
+  const fetchFn = async () => {
+    called = true;
+    return jsonResponse({ status: 'ok' });
+  };
+  await assert.rejects(setFollowState({ targetId: '1', follow: false, fetchFn }), {
+    code: 'auth',
+  });
+  assert.equal(called, false);
+});
+
+test('setFollowState turns an HTML login/redirect response into an actionable auth error', async () => {
+  const fetchFn = async () => htmlResponse('<!DOCTYPE html><html><body>Log in</body></html>');
   await assert.rejects(
-    setFollowState({ targetId: '1', follow: false, fetchFn: async () => jsonResponse({}, { status: 403 }) }),
+    setFollowState({ targetId: '1', follow: false, csrfToken: 'CSRF', fetchFn }),
+    (err) => err.code === 'auth' && /login or security-check/i.test(err.message)
+  );
+});
+
+test('setFollowState surfaces auth, rate-limit and bad-body errors', async () => {
+  await assert.rejects(
+    setFollowState({
+      targetId: '1',
+      follow: false,
+      csrfToken: 'CSRF',
+      fetchFn: async () => jsonResponse({}, { status: 403 }),
+    }),
     { code: 'auth' }
   );
   await assert.rejects(
-    setFollowState({ targetId: '1', follow: false, fetchFn: async () => jsonResponse({}, { status: 429 }) }),
+    setFollowState({
+      targetId: '1',
+      follow: false,
+      csrfToken: 'CSRF',
+      fetchFn: async () => jsonResponse({}, { status: 429 }),
+    }),
     { code: 'rate_limit' }
   );
   await assert.rejects(
-    setFollowState({ targetId: '1', follow: false, fetchFn: async () => jsonResponse({ status: 'fail' }) }),
+    setFollowState({
+      targetId: '1',
+      follow: false,
+      csrfToken: 'CSRF',
+      fetchFn: async () => jsonResponse({ status: 'fail' }),
+    }),
     { code: 'bad_body' }
   );
 });

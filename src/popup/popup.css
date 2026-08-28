@@ -327,10 +327,23 @@ h1, h2, p {
   gap: 10px;
   padding: 7px 4px;
   border-bottom: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .row:hover {
   background: var(--row-hover);
+}
+
+/* Fade + collapse when an account is unfollowed. maxHeight is set inline
+   (to the row's measured height) just before .row-removing is added. */
+.row-removing {
+  max-height: 0 !important;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  border-bottom-color: transparent;
+  pointer-events: none;
+  transition: max-height 0.28s ease, opacity 0.28s ease, padding 0.28s ease;
 }
 
 .row:last-of-type {

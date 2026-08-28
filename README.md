@@ -6,13 +6,13 @@ Tired of thinking you have a lot of friends, buy you have none?
 
 A Chrome extension that shows which Instagram accounts **you follow that don't follow you back** PLUS your "fans" (people who follow you that you don't follow back), to understand your own karma.
 
-Everything runs **100% locally in your browser**, using the Instagram tab you are already logged in to. No external servers, no analytics, no credentials handled. Totally legal.
+Everything runs **100% locally in your browser**, using the Instagram tab you are already logged in to. No external servers, no analytics, no credentials handled — ever.
 
 ## Features
 
 - 🔍 **One-click scan** of your following and followers lists
 - 📊 **Live progress** with real counts (the scan keeps running even if you close the popup)
-- 🚫 **"Don't follow back" list** with profile picture, username, and a one-click **Unfollow** button (the button flips to **Follow** so you can undo it)
+- 🚫 **"Don't follow back" list** with profile picture, username, and a one-click **Unfollow** button — the row fades out and drops off the list once the unfollow succeeds
 - 💜 **Fans tab** — people who follow you that you don't follow back
 - 📈 **Change tracking** — every scan is diffed against the previous one, so new unfollowers are badged **NEW** and a banner tells you how many you gained since last time
 - ⏰ **Daily sync** (opt-in) — once a day while Chrome is open, rescan automatically and get a **system notification** summarising your totals and what changed
@@ -27,11 +27,7 @@ Everything runs **100% locally in your browser**, using the Instagram tab you ar
 
 ## Install (Developer mode)
 
-1. Clone this repository:
-
-   ```bash
-   git clone https://github.com/franchodl/insta-unfollowers.git
-   ```
+1. Download or clone this repository.
 2. Open Chrome and go to `chrome://extensions`.
 3. Turn on **Developer mode** (top-right toggle).
 4. Click **Load unpacked** and select this project's folder (the one containing `manifest.json`).
@@ -50,7 +46,7 @@ Results are cached locally, so reopening the popup shows your last scan instantl
 
 ### Unfollowing
 
-Each row in the **Don't follow back** tab has an **Unfollow** button. Clicking it unfollows that one account through your own session (a single request, exactly like clicking Unfollow on the website), then the button turns into **Follow** so you can immediately undo it. There is intentionally **no bulk-unfollow**: mass actions are the fastest way to get action-blocked, so this tool keeps it one deliberate click at a time.
+Each row in the **Don't follow back** tab has an **Unfollow** button. Clicking it unfollows that one account through your own session (a single request, exactly like clicking Unfollow on the website); on success the row **fades out and disappears** from the list, and the account stays gone (even if you reopen the popup) until your next scan. There is intentionally **no bulk-unfollow**: mass actions are the fastest way to get action-blocked, so this tool keeps it one deliberate click at a time.
 
 ### Daily sync & notifications (opt-in)
 
@@ -143,4 +139,4 @@ This is an unofficial tool, not affiliated with or endorsed by Instagram/Meta. I
 
 ## License
 
-This project is open source under the [MIT License](LICENSE).
+[MIT](LICENSE)
